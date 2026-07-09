@@ -1,0 +1,169 @@
+import os
+from pathlib import Path
+import random
+
+import numpy as np
+import pandas as pd
+from PIL import Image
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import train_test_split
+# New import for visualization
+import matplotlib.pyplot as plt
+
+# ---------- paths (change if needed) ----------
+BASE_DIR = Path(__file__).parent / "mnist"
+
+# use trainingSample for faster runs, or trainingSet for full dataset
+TRAIN_DIR = BASE_DIR / "trainingSample" / "trainingSample"
+TEST_DIR = BASE_DIR / "testSample"
+
+TRAIN_CSV = Path(__file__).parent / "mnist_train.csv"
+TEST_CSV = Path(__file__).parent / "mnist_test.csv"
+PREDICTIONS_CSV = Path(__file__).parent / "mnist_predictions.csv"
+
+def load_image_pixels(image_path: Path) -> np.ndarray:
+    """Read a 28x28 grayscale image and return 784 pixel values."""
+    img = Image.open(image_path).convert("L")
+    return np.array(img, dtype=np.uint8).flatten()
+
+def images_folder_to_csv(images_root: Path, csv_path: Path, labeled: bool = True) -> pd.DataFrame:
+    """
+    Convert images to CSV.
+    labeled=True  -> expects folders 0,1,...,9 with images inside
+    labeled=False -> only filename + pixels (for test set)
+    """
+    rows = []
+
+    if labeled:
+        for digit in range(10):
+            digit_folder = images_root / str(digit)
+            if not digit_folder.exists():
+                continue
+
+            for image_path in sorted(digit_folder.glob("*.jpg")):
+                pixels = load_image_pixels(image_path)
+                row = {"filename": image_path.name, "label": digit}
+                for i, value in enumerate(pixels):
+                    row[f"pixel_{i}"] = int(value)
+                rows.append(row)
+    else:
+        for image_path in sorted(images_root.glob("*.jpg")):
+            pixels = load_image_pixels(image_path)
+            row = {"filename": image_path.name}
+            for i, value in enumerate(pixels):
+                row[f"pixel_{i}"] = int(value)
+            rows.append(row)
+
+    df = pd.DataFrame(rows)
+    df.to_csv(csv_path, index=False)
+
+    print(f"Saved CSV: {csv_path}")
+    print(f"Rows: {len(df)}")
+    if labeled:
+        print("Labels:\n", df["label"].value_counts().sort_index())
+
+    return df
+
+def train_model(train_df: pd.DataFrame) -> RandomForestClassifier:
+    """Train Random Forest on CSV data."""
+    pixel_cols = [col for col in train_df.columns if col.startswith("pixel_")]
+
+    X = train_df[pixel_cols].values
+    y = train_df["label"].values
+
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    model = RandomForestClassifier(
+        n_estimators=100,
+        random_state=42,
+        n_jobs=-1,
+    )
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_val)
+    print(f"\nValidation accuracy: {accuracy_score(y_val, y_pred):.4f}")
+    print("\nClassification report:")
+    print(classification_report(y_val, y_pred))
+
+    return model
+
+def predict_test_images(model: RandomForestClassifier, test_df: pd.DataFrame) -> pd.DataFrame:
+    """Predict digits for unlabeled test images."""
+    pixel_cols = [col for col in test_df.columns if col.startswith("pixel_")]
+    X_test = test_df[pixel_cols].values
+
+    predictions = model.predict(X_test)
+
+    result = pd.DataFrame({
+        "filename": test_df["filename"],
+        "predicted_digit": predictions,
+    })
+
+    result.to_csv(PREDICTIONS_CSV, index=False)
+    print(f"\nSaved predictions: {PREDICTIONS_CSV}")
+    print(result.head(10))
+
+    return result
+
+def visualize_predictions(test_df: pd.DataFrame, predictions_df: pd.DataFrame, num_samples: int = 10) -> None:
+    """Select random test images and plot them with their predicted labels."""
+    print(f"\nVisualizing {num_samples} random predictions...")
+    
+    # Extract pixel columns and filenames
+    pixel_cols = [col for col in test_df.columns if col.startswith("pixel_")]
+    
+    # Pick random indices to display
+    total_images = len(test_df)
+    if total_images == 0:
+        print("No test images available to visualize.")
+        return
+        
+    num_samples = min(num_samples, total_images)
+    sample_indices = random.sample(range(total_images), num_samples)
+    
+    # Configure grid layout (2 rows)
+    cols = min(5, num_samples)
+    rows = (num_samples + cols - 1) // cols
+    
+    plt.figure(figsize=(2 * cols, 2.5 * rows))
+    
+    for idx, sample_idx in enumerate(sample_indices):
+        # Get pixel array and reshape back to 28x28
+        pixel_values = test_df.iloc[sample_idx][pixel_cols].values.astype(np.uint8)
+        image_matrix = pixel_values.reshape(28, 28)
+        
+        # Get predicted label
+        filename = test_df.iloc[sample_idx]["filename"]
+        pred_label = predictions_df.loc[predictions_df["filename"] == filename, "predicted_digit"].values[0]
+        
+        # Plotting subplot
+        plt.subplot(rows, cols, idx + 1)
+        plt.imshow(image_matrix, cmap="gray")
+        plt.title(f"Pred: {pred_label}", fontsize=12, fontweight="bold", color="darkblue")
+        plt.axis("off")
+        
+    plt.tight_layout()
+    plt.show()
+
+def main() -> None:
+    print("Step 1: Convert training images to CSV")
+    train_df = images_folder_to_csv(TRAIN_DIR, TRAIN_CSV, labeled=True)
+
+    print("\nStep 2: Train Random Forest")
+    model = train_model(train_df)
+
+    print("\nStep 3: Convert test images to CSV")
+    test_df = images_folder_to_csv(TEST_DIR, TEST_CSV, labeled=False)
+
+    print("\nStep 4: Predict digits 0-9")
+    predictions_df = predict_test_images(model, test_df)
+    
+    # New step for showing visual predictions
+    print("\nStep 5: Visualizing Results")
+    visualize_predictions(test_df, predictions_df, num_samples=10)
+
+if __name__ == "__main__":
+    main()
