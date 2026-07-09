@@ -1,0 +1,135 @@
+import os
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import r2_score, root_mean_squared_error
+
+# Models
+from sklearn.linear_model import Ridge
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+
+# 1. Path setup
+wheat_dir = r"baraa\wheat"
+yield_df_path = os.path.join(wheat_dir, "yield_df.csv")
+
+print("--- STAGE 1: Loading and Filtering Dataset ---")
+df = pd.read_csv(yield_df_path)
+df.columns = df.columns.str.strip()
+
+# Filter strictly for Wheat rows
+df_wheat = df[df["Item"].str.lower() == "wheat"].copy()
+
+# Drop rows with missing values
+df_wheat = df_wheat.dropna(
+    subset=[
+        "hg/ha_yield",
+        "average_rain_fall_mm_per_year",
+        "pesticides_tonnes",
+        "avg_temp",
+    ]
+)
+
+# --- TON UNIT CONVERSION ---
+# Convert target from hectograms per hectare (hg/ha) to Metric Tons per Hectare (t/ha)
+# Formula: (hg/ha) * 0.1 / 1000 = (hg/ha) / 10,000
+df_wheat["yield_metric_tons"] = df_wheat["hg/ha_yield"] / 10000
+
+print(f"Dataset successfully scaled to Metric Tons. Rows available: {df_wheat.shape[0]}")
+
+
+# --- STAGE 2: Splitting Features & Target ---
+numeric_features = [
+    "Year",
+    "average_rain_fall_mm_per_year",
+    "pesticides_tonnes",
+    "avg_temp",
+]
+categorical_features = ["Area"]
+
+X = df_wheat[numeric_features + categorical_features]
+y = df_wheat["yield_metric_tons"]  # Targeted to our new Metric Tons column
+
+
+# --- STAGE 3: Training & Comparing Yearly Models ---
+print("\n--- STAGE 3: Training & Comparing Models ---")
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+# Preprocessing Pipeline
+preprocessor = ColumnTransformer(
+    transformers=[
+        ("num", StandardScaler(), numeric_features),
+        (
+            "cat",
+            OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+            categorical_features,
+        ),
+    ]
+)
+
+# Models to evaluate
+models = {
+    "Ridge Regression": Ridge(),
+    "Random Forest": RandomForestRegressor(
+        n_estimators=100, max_depth=15, random_state=42, n_jobs=-1
+    ),
+    "Gradient Boosting": GradientBoostingRegressor(
+        n_estimators=100, random_state=42
+    ),
+}
+
+best_r2 = -float("inf")
+best_model_name = ""
+winning_pipeline = None
+
+for name, model in models.items():
+    pipeline = Pipeline(
+        steps=[("preprocessor", preprocessor), ("regressor", model)]
+    )
+    pipeline.fit(X_train, y_train)
+
+    preds = pipeline.predict(X_test)
+    r2 = r2_score(y_test, preds)
+    rmse = root_mean_squared_error(y_test, preds)
+
+    # RMSE is cleanly expressed in absolute Metric Tons per Hectare
+    print(f" - {name:20} -> R²: {r2:.4f} | RMSE: {rmse:.4f} Tons/Hectare")
+
+    if r2 > best_r2:
+        best_r2 = r2
+        best_model_name = name
+        winning_pipeline = pipeline
+
+print(f"\n--> Winner: {best_model_name} (R² score: {best_r2:.4f})")
+
+
+# -------------------------------------------------------------------------
+# STAGE 4: Generating a Live Prediction Example (Tons)
+# -------------------------------------------------------------------------
+print("\n--- STAGE 4: Sample Prediction Breakdown ---")
+
+# Modify these values to test different scenarios
+sample_input = pd.DataFrame(
+    {
+        "Year": [2026],
+        "average_rain_fall_mm_per_year": [1200.0],
+        "pesticides_tonnes": [150.0],
+        "avg_temp": [18.5],
+        "Area": ["India"],  # Make sure the country is listed in your dataset
+    }
+)
+
+# Predict using the winning pipeline
+predicted_tons_per_hectare = winning_pipeline.predict(sample_input)[0]
+
+print("Input Metrics for Prediction:")
+print(f" - Target Year: {sample_input['Year'][0]}")
+print(f" - Location:    {sample_input['Area'][0]}")
+print(f" - Weather:     {sample_input['avg_temp'][0]}°C | {sample_input['average_rain_fall_mm_per_year'][0]}mm Rain")
+print(f" - Pesticides:  {sample_input['pesticides_tonnes'][0]} Tonnes")
+print("-" * 50)
+print(f"==> PREDICTED WHEAT YIELD: {predicted_tons_per_hectare:.3f} Metric Tons per Hectare")
