@@ -1,23 +1,4 @@
-# =========================================================================
-# CRITICAL FIRST-LINE SYSTEM HOOK: DO NOT MOVE THIS LOWER
-# =========================================================================
-import sys
-import matplotlib
-import matplotlib.cm as cm
-
-def _bulletproof_get_cmap(name=None, *args, **kwargs):
-    if name is None:
-        return matplotlib.colormaps
-    return matplotlib.colormaps.get_cmap(name)
-
-# Inject the missing method globally across all possible access routes
-cm.get_cmap = _bulletproof_get_cmap
-matplotlib.cm.get_cmap = _bulletproof_get_cmap
-if 'matplotlib.cm' in sys.modules:
-    sys.modules['matplotlib.cm'].get_cmap = _bulletproof_get_cmap
-
-# Now proceed with normal package loads
-import streamlit as st
+﻿import streamlit as st
 import folium
 from streamlit_folium import st_folium
 from folium.plugins import Draw
@@ -27,9 +8,10 @@ import numpy as np
 import pandas as pd
 import requests
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 
 # Geospatial Packages
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon, box, Point
 import pyproj
 
 # Machine Learning
@@ -44,13 +26,11 @@ from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 
 # Setup page configurations
-st.set_page_config(page_title="Precision Agriculture: Real-Time Wheat Yield Estimator", page_icon="🌾", layout="wide")
+st.set_page_config(page_title="Baraa Wheat Yield Estimator", page_icon="🌾", layout="wide")
 
-# Initialize session state for storing analyzed grid results to re-render onto map
-if "spatial_results" not in st.session_state:
-    st.session_state.spatial_results = None
-
+# =========================================================================
 # Custom Advanced UI CSS Injection (Midnight Crimson Theme)
+# =========================================================================
 st.markdown(
     """
     <style>
@@ -101,7 +81,7 @@ st.markdown(
 )
 
 # =========================================================================
-# 1. LIVE RE-TRAINING TOURNAMENT SYSTEM
+# 1. DATA MODEL PIPELINE TRAINING ENGINE
 # =========================================================================
 @st.cache_resource
 def train_production_model():
@@ -113,7 +93,7 @@ def train_production_model():
         st.error(f"Critical Error: Data source missing at {yield_df_path}")
         return None, ["Egypt"]
 
-    df = pd.read_csv(yield_df_path, encoding="latin1")
+    df = pd.read_csv(yield_df_path)
     df.columns = df.columns.str.strip()
     df_wheat = df[df["Item"].str.lower() == "wheat"].copy().dropna(
         subset=["hg/ha_yield", "average_rain_fall_mm_per_year", "pesticides_tonnes", "avg_temp"]
@@ -144,10 +124,7 @@ def train_production_model():
     winning_pipeline = None
 
     for name, model in models.items():
-        pipeline = Pipeline(steps=[
-            ("preprocessor", preprocessor), 
-            ("regressor", model)
-        ])
+        pipeline = Pipeline(steps=[("preprocessor", preprocessor), ("regressor", model)])
         pipeline.fit(X_train, y_train)
         preds = pipeline.predict(X_test)
         r2 = r2_score(y_test, preds)
@@ -159,14 +136,14 @@ def train_production_model():
 
 production_pipeline, country_list = train_production_model()
 
-# Sidebar Controls
-st.sidebar.markdown("## Context Controls")
+# Sidebar Context Components
+st.sidebar.markdown("## ⚙️ Model Context Controls")
 selected_year = st.sidebar.number_input("Target Input Year", min_value=1960, max_value=2030, value=2026, step=1)
 selected_country = st.sidebar.selectbox("Target Production Country Area", options=country_list, index=country_list.index("Egypt") if "Egypt" in country_list else 0)
 selected_pesticides = st.sidebar.slider("Pesticides Allocation (Tonnes)", min_value=0.0, max_value=500.0, value=150.0, step=5.0)
 
 # =========================================================================
-# 2. COMPUTATIONAL GEOSPATIAL GEOMETRY & TELEMETRY
+# 2. COMPUTATIONAL GEOSPATIAL ANALYSIS MATRIX LOGIC
 # =========================================================================
 def calculate_utm_geometry(coords):
     lon_coords = [c[0] for c in coords]
@@ -193,41 +170,31 @@ def fetch_live_features(lat, lon):
         
     return {"avg_temp": live_temp, "average_rain_fall_mm_per_year": live_rain}
 
-def get_color_for_yield(val, min_val, max_val):
-    if np.isnan(val):
-        return None
-    if max_val == min_val:
-        return "#00FF00"
-    box_norm = (val - min_val) / (max_val - min_val)
-    if box_norm < 0.5:
-        r = 255
-        g = int(255 * (box_norm * 2))
-    else:
-        r = int(255 * (2 * (1.0 - box_norm)))
-        g = 255
-    return f"#{r:02x}{g:02x}00"
-
 # =========================================================================
-# 3. ADVANCED IN-MEMORY SATELLITE ENGINE & VECTOR CROP-MASKING
+# 3. ADVANCED IN-MEMORY RASTER ENGINE (PAGE 2-3 PROTOCOLS)
 # =========================================================================
 def process_spatial_grids(poly_wgs84, epsg_code, base_features):
+    """ Implements Vector Clipping Masking and Local In-Memory Matrix Array Slicing """
     to_utm = pyproj.Transformer.from_crs("EPSG:4326", epsg_code, always_xy=True).transform
     to_wgs84 = pyproj.Transformer.from_crs(epsg_code, "EPSG:4326", always_xy=True).transform
     
     utm_poly = Polygon([to_utm(x, y) for x, y in poly_wgs84.exterior.coords])
     minx, miny, maxx, maxy = utm_poly.bounds
     
-    dx, dy = 10.0, 10.0  
+    # Generate 10mx10m physical grids across bounding box
+    dx, dy = 10.0, 10.0
     nx = max(3, int(math.ceil((maxx - minx) / dx)))
     ny = max(3, int(math.ceil((maxy - miny) / dy)))
     
+    # Single Master Master Image Simulation (Avoids making individual cell API requests)
     np.random.seed(42)
-    B2 = np.random.uniform(0.02, 0.08, (ny, nx))  
-    B3 = np.random.uniform(0.03, 0.12, (ny, nx))  
-    B4 = np.random.uniform(0.02, 0.15, (ny, nx))  
-    B5 = np.random.uniform(0.08, 0.22, (ny, nx))  
-    B8 = np.random.uniform(0.40, 0.85, (ny, nx))  
+    B2 = np.random.uniform(0.02, 0.08, (ny, nx))  # Blue Band
+    B3 = np.random.uniform(0.03, 0.12, (ny, nx))  # Green Band
+    B4 = np.random.uniform(0.02, 0.15, (ny, nx))  # Red Band
+    B5 = np.random.uniform(0.08, 0.22, (ny, nx))  # Red Edge
+    B8 = np.random.uniform(0.40, 0.85, (ny, nx))  # NIR Band
     
+    # Compute Advanced Spectral Matrices In-Memory
     ndvi = (B8 - B4) / (B8 + B4 + 1e-5)
     evi = 2.5 * ((B8 - B4) / (B8 + 6.0 * B4 - 7.5 * B2 + 1.0 + 1e-5))
     ndwi = (B3 - B8) / (B3 + B8 + 1e-5)
@@ -236,16 +203,18 @@ def process_spatial_grids(poly_wgs84, epsg_code, base_features):
     ndre = (B8 - B5) / (B8 + B5 + 1e-5)
     
     rgb = np.dstack([np.clip(B4*6, 0, 1), np.clip(B3*6, 0, 1), np.clip(B2*6, 0, 1)])
+    
     yield_grid = np.full((ny, nx), np.nan)
-    hectares = utm_poly.area / 10000.0
+    total_area_sqm = utm_poly.area
+    hectares = total_area_sqm / 10000.0
     
-    interactive_squares = []
-    
+    # Vector Masking Optimization loop
     for i in range(ny):
         for j in range(nx):
             cx = minx + (j + 0.5) * dx
             cy = miny + (i + 0.5) * dy
             if utm_poly.contains(Point(cx, cy)):
+                # Injecting micro variability through NDVI matrix proxies
                 cell_features = pd.DataFrame([{
                     "Year": selected_year,
                     "average_rain_fall_mm_per_year": base_features["average_rain_fall_mm_per_year"] + (ndvi[i, j] * 15.0),
@@ -253,82 +222,40 @@ def process_spatial_grids(poly_wgs84, epsg_code, base_features):
                     "avg_temp": base_features["avg_temp"] - (ndvi[i, j] * 0.5),
                     "Area": selected_country
                 }])
-                pred_yield = production_pipeline.predict(cell_features)[0]
-                yield_grid[i, j] = pred_yield
+                yield_grid[i, j] = production_pipeline.predict(cell_features)[0]
                 
-                sw = to_wgs84(minx + j * dx, miny + i * dy)
-                ne = to_wgs84(minx + (j + 1) * dx, miny + (i + 1) * dy)
-                
-                interactive_squares.append({
-                    "bounds": [[sw[1], sw[0]], [ne[1], ne[0]]],
-                    "yield": pred_yield,
-                    "ndvi": ndvi[i, j]
-                })
-                
-    return hectares, rgb, yield_grid, {"NDVI": ndvi, "EVI": evi, "NDWI": ndwi, "SAVI": savi, "GNDVI": gndvi, "NDRE": ndre}, interactive_squares
+    return hectares, rgb, yield_grid, {"NDVI": ndvi, "EVI": evi, "NDWI": ndwi, "SAVI": savi, "GNDVI": gndvi, "NDRE": ndre}
 
 # =========================================================================
-# 4. STREAMLIT APPLICATION GRAPHICAL USER INTERFACE
+# 4. USER INTERFACE FRAMEWORK GENERATOR
 # =========================================================================
-st.title("Precision Agriculture: Real-Time Wheat Yield Estimator")
+st.title("🌾 Baraa Wheat Yield Estimator")
 st.markdown("---")
 
 col_map, col_results = st.columns([1.4, 1.6], gap="large")
 
 with col_map:
-    st.subheader("Interactive Plot Boundary Selector")
-    st.caption("Outline your farm boundary. Analyzed squares will be drawn directly back onto this map:")
+    st.subheader("🗺️ Interactive Plot Boundary Selector")
+    st.caption("Outline your target field boundary path precisely using the polygon manager tools:")
     
-    start_lat, start_lon = 31.4015, 30.8631
-    if st.session_state.spatial_results:
-        start_lat = st.session_state.spatial_results["center_lat"]
-        start_lon = st.session_state.spatial_results["center_lon"]
-
     m = folium.Map(
-        location=[start_lat, start_lon], 
-        zoom_start=16, 
+        location=[31.4015, 30.8631], 
+        zoom_start=15, 
         tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         attr='Esri Satellite'
     )
-    
-    if st.session_state.spatial_results:
-        squares = st.session_state.spatial_results["squares"]
-        yield_vals = [s["yield"] for s in squares]
-        min_y, max_y = min(yield_vals) if yield_vals else 0, max(yield_vals) if yield_vals else 1
-        
-        for sq in squares:
-            color = get_color_for_yield(sq["yield"], min_y, max_y)
-            status = "🟢 Healthy Block" if sq["yield"] >= np.median(yield_vals) else "🔴 Warning: Stress Detected"
-            popup_text = f"""
-            <div style='font-family: Arial; width: 180px; color: black;'>
-                <b>Square Grid Unit</b><br/>
-                <hr style='margin:4px 0; border-color: #ccc;'/>
-                Status: {status}<br/>
-                <b>Yield: {sq["yield"]:.2f} Tons/Ha</b><br/>
-                NDVI Index: {sq["ndvi"]:.2f}
-            </div>
-            """
-            folium.Rectangle(
-                bounds=sq["bounds"],
-                fill=True,
-                color=color,
-                fill_color=color,
-                fill_opacity=0.45,
-                weight=1,
-                popup=folium.Popup(popup_text, max_width=250)
-            ).add_to(m)
-
     Draw(
         export=False,
         position='topleft',
         draw_options={'polyline': False, 'circle': False, 'marker': False, 'circlemarker': False, 'polygon': True, 'rectangle': True}
     ).add_to(m)
     
-    map_data = st_folium(m, width="100%", height=530, key="farm_map")
+    map_data = st_folium(m, width="100%", height=500)
 
 with col_results:
-    st.subheader("Inference & Telemetry Calculations")
+    st.subheader("📊 Inference & Telemetry Calculations")
     
+    # LINE 113: ADVANCED STRUCTURAL ERROR HANDLING
     has_valid_drawing = False
     coords = None
     
@@ -339,100 +266,96 @@ with col_results:
                 coords = geometry["coordinates"][0]
                 if len(coords) >= 4:
                     has_valid_drawing = True
+            else:
+                st.warning("⚠️ Unsupported layer type detected. Please outline fields strictly using Polygon shapes.")
     except Exception as geo_err:
         st.error(f"Geospatial Parsing Failure: {str(geo_err)}")
 
     if has_valid_drawing and coords:
-        st.info("Boundary shape successfully extracted.")
+        st.info("🎯 Boundary shape successfully extracted.")
         
-        if st.button("Run Forecast Pipeline", use_container_width=True):
+        if st.button("🚀 Run Forecast Pipeline", use_container_width=True):
             with st.spinner("Executing spatial analysis and raster index masking integrations..."):
                 try:
                     poly_wgs84, epsg_code, center_lat, center_lon = calculate_utm_geometry(coords)
                     api_data = fetch_live_features(center_lat, center_lon)
                     
-                    hectares, rgb_img, yield_grid, indices, interactive_squares = process_spatial_grids(poly_wgs84, epsg_code, api_data)
+                    # RUN CORE RASTER PIPELINE MASKED INTEGRATIONS
+                    hectares, rgb_img, yield_grid, indices = process_spatial_grids(poly_wgs84, epsg_code, api_data)
                     
+                    # Compute Macro Total Yield Averaging Metrics
                     avg_yield_density = np.nanmean(yield_grid) if not np.isnan(yield_grid).all() else 0.0
+                    if avg_yield_density == 0.0:
+                        macro_input = pd.DataFrame([{"Year": selected_year, "average_rain_fall_mm_per_year": api_data["average_rain_fall_mm_per_year"], "pesticides_tonnes": selected_pesticides, "avg_temp": api_data["avg_temp"], "Area": selected_country}])
+                        avg_yield_density = production_pipeline.predict(macro_input)[0]
+                    
                     total_tons = avg_yield_density * hectares
                     
-                    st.session_state.spatial_results = {
-                        "squares": interactive_squares,
-                        "center_lat": center_lat,
-                        "center_lon": center_lon,
-                        "hectares": hectares,
-                        "total_tons": total_tons,
-                        "api_data": api_data,
-                        "rgb_img": rgb_img,
-                        "indices": indices,
-                        "yield_grid": yield_grid
-                    }
-                    st.rerun()
+                    st.success("Analysis Complete!")
+                    st.markdown("### 🌐 Extracted Environmental Features")
+                    tc1, tc2 = st.columns(2)
+                    with tc1:
+                        st.metric("Mean Temperature", f"{api_data['avg_temp']:.1f} C")
+                        st.metric("Target Country", str(selected_country))
+                        st.metric("Calculated Area Size", f"{hectares:.2f} Ha")
+                    with tc2:
+                        st.metric("Annual Rainfall", f"{api_data['average_rain_fall_mm_per_year']:.1f} mm")
+                        st.sidebar.metric("Winning Pipeline Metric", "Active")
+                        st.metric("Total Yield Forecast", f"{total_tons:.2f} Metric Tons")
+                    
+                    st.divider()
+                    
+                    # INTRA FIELD HEATMAP MATRIX
+                    st.markdown("### 🗺️ Intra-Field Yield Heterogeneity Map ($10m \\times 10m$ Grid)")
+                    fig_yield, ax_yield = plt.subplots(figsize=(6, 3.5))
+                    fig_yield.patch.set_facecolor('#1A0000')
+                    ax_yield.set_facecolor('#100000')
+                    
+                    # Show masked pixels cleanly over background
+                    current_cmap = plt.cm.get_cmap('RdYlGn').copy()
+                    current_cmap.set_bad(color='#1A0000', alpha=0.0)
+                    
+                    im = ax_yield.imshow(yield_grid, cmap=current_cmap, origin='lower')
+                    cbar = fig_yield.colorbar(im, ax=ax_yield)
+                    cbar.ax.yaxis.set_tick_params(colors='white')
+                    cbar.set_label('Yield (Tons/Ha)', color='white')
+                    ax_yield.axis('off')
+                    st.pyplot(fig_yield)
+                    
+                    st.divider()
+                    
+                    # 6-INDEX VISUALIZATION SPECTRAL INDEX DASHBOARD (PAGE 2-3 CAPABILITIES)
+                    st.markdown("### 🛰️ Multi-Spectral Index Satellite Dashboard")
+                    
+                    r1_c1, r1_c2, r1_c3 = st.columns(3)
+                    with r1_c1:
+                        st.write("**True-Color RGB**")
+                        f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
+                        a.imshow(rgb_img); a.axis('off'); st.pyplot(f)
+                    with r1_c2:
+                        st.write("**NDVI (Greenness Density)**")
+                        f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
+                        im = a.imshow(indices["NDVI"], cmap='YlGn'); a.axis('off'); f.colorbar(im, ax=a); st.pyplot(f)
+                    with r1_c3:
+                        st.write("**EVI (Canopy Enhancement)**")
+                        f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
+                        im = a.imshow(indices["EVI"], cmap='Greens'); a.axis('off'); f.colorbar(im, ax=a); st.pyplot(f)
+                        
+                    r2_c1, r2_c2, r2_c3 = st.columns(3)
+                    with r2_c1:
+                        st.write("**NDWI (Crop Water Stress)**")
+                        f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
+                        im = a.imshow(indices["NDWI"], cmap='Blues'); a.axis('off'); f.colorbar(im, ax=a); st.pyplot(f)
+                    with r2_c2:
+                        st.write("**SAVI (Soil Adjusted)**")
+                        f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
+                        im = a.imshow(indices["SAVI"], cmap='YlOrBr'); a.axis('off'); f.colorbar(im, ax=a); st.pyplot(f)
+                    with r2_c3:
+                        st.write("**GNDVI / NDRE Matrix**")
+                        f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
+                        im = a.imshow(indices["NDRE"], cmap='RdYlGn'); a.axis('off'); f.colorbar(im, ax=a); st.pyplot(f)
                         
                 except Exception as err:
                     st.error(f"Pipeline processing error triggered: {str(err)}")
-                    
-    if st.session_state.spatial_results:
-        res = st.session_state.spatial_results
-        st.success("Analysis Complete!")
-        
-        st.markdown("### Extracted Environmental Features")
-        tc1, tc2 = st.columns(2)
-        with tc1:
-            st.metric("Mean Temperature", f"{res['api_data']['avg_temp']:.1f} C")
-            st.metric("Target Country", str(selected_country))
-            st.metric("Calculated Area Size", f"{res['hectares']:.2f} Ha")
-        with tc2:
-            st.metric("Annual Rainfall", f"{res['api_data']['average_rain_fall_mm_per_year']:.1f} mm")
-            st.metric("Total Yield Forecast", f"{res['total_tons']:.2f} Metric Tons")
-        
-        st.divider()
-        
-        st.markdown("### Intra-Field Yield Heterogeneity Map (10m × 10m Grid)")
-        fig_yield, ax_yield = plt.subplots(figsize=(6, 3.5))
-        fig_yield.patch.set_facecolor('#1A0000')
-        ax_yield.set_facecolor('#100000')
-        
-        current_cmap = matplotlib.colormaps['RdYlGn'].copy()
-        current_cmap.set_bad(color='#1A0000', alpha=0.0)
-        
-        im = ax_yield.imshow(res["yield_grid"], cmap=current_cmap, origin='lower')
-        cbar = fig_yield.colorbar(im, ax=ax_yield)
-        cbar.ax.yaxis.set_tick_params(colors='white')
-        cbar.set_label('Yield (Tons/Ha)', color='white')
-        ax_yield.axis('off')
-        st.pyplot(fig_yield)
-        
-        st.divider()
-        
-        st.markdown("### Multi-Spectral Index Satellite Dashboard")
-        
-        r1_c1, r1_c2, r1_c3 = st.columns(3)
-        with r1_c1:
-            st.write("**True-Color RGB**")
-            f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
-            a.imshow(res["rgb_img"]); a.axis('off'); st.pyplot(f)
-        with r1_c2:
-            st.write("**NDVI (Greenness Density)**")
-            f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
-            im = a.imshow(res["indices"]["NDVI"], cmap=matplotlib.colormaps['YlGn']); a.axis('off'); f.colorbar(im, ax=a); st.pyplot(f)
-        with r1_c3:
-            st.write("**EVI (Canopy Enhancement)**")
-            f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
-            im = a.imshow(res["indices"]["EVI"], cmap=matplotlib.colormaps['Greens']); a.axis('off'); f.colorbar(im, ax=a); st.pyplot(f)
-            
-        r2_c1, r2_c2, r2_c3 = st.columns(3)
-        with r2_c1:
-            st.write("**NDWI (Crop Water Stress)**")
-            f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
-            im = a.imshow(res["indices"]["NDWI"], cmap=matplotlib.colormaps['Blues']); a.axis('off'); f.colorbar(im, ax=a); st.pyplot(f)
-        with r2_c2:
-            st.write("**SAVI (Soil Adjusted)**")
-            f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
-            im = a.imshow(res["indices"]["SAVI"], cmap=matplotlib.colormaps['YlOrBr']); a.axis('off'); f.colorbar(im, ax=a); st.pyplot(f)
-        with r2_c3:
-            st.write("**GNDVI / NDRE Matrix**")
-            f, a = plt.subplots(figsize=(3, 3)); f.patch.set_facecolor('#1A0000')
-            im = a.imshow(res["indices"]["NDRE"], cmap=matplotlib.colormaps['RdYlGn']); a.axis('off'); f.colorbar(im, ax=a); st.pyplot(f)
-else:
-    st.warning("Waiting for a farm plot boundary shape selection on the satellite map view panel...")
+    else:
+        st.warning("Waiting for a farm plot boundary shape selection on the satellite map view panel...")
