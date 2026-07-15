@@ -1,0 +1,108 @@
+import sqlite3, uuid, os
+from ollama import Client
+
+DB_NAME = "chat_history.db"
+
+def db_query(query, params=(), fetch=False, fetchall=False):
+    """Handles all database interactions."""
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.execute(query, params)
+        conn.commit()
+        if fetchall: return cursor.fetchall()
+        if fetch: return cursor.fetchone()
+
+def init_db():
+    db_query("CREATE TABLE IF NOT EXISTS chat_messages (session_id TEXT, role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
+    db_query("CREATE TABLE IF NOT EXISTS user_profile (key TEXT PRIMARY KEY, value TEXT)")
+
+def ai_detect_name(client, model, user_input):
+    """Uses Gemma to extract your name from natural sentences."""
+    prompt = f"Analyze: '{user_input}'. If the user states their name, reply with ONLY the name (no punctuation). Otherwise reply: None"
+    try:
+        res = client.generate(model=model, prompt=prompt).get('response', '').strip()
+        if res and res.lower() != "none" and len(res) < 30:
+            db_query("INSERT OR REPLACE INTO user_profile VALUES ('user_name', ?)", (res,))
+            return res
+    except: pass
+    return None
+
+def read_file_tool(file_path):
+    """Reads a local file and returns its content or an error message."""
+    normalized_path = file_path.strip().strip("'\"")
+    if not os.path.exists(normalized_path):
+        return f"[Error: File not found at '{normalized_path}']"
+    try:
+        with open(normalized_path, 'r', encoding='utf-8', errors='ignore') as f:
+            return f.read()
+    except Exception as e:
+        return f"[Error reading file: {e}]"
+
+def main():
+    init_db()
+    client = Client(host="http://192.168.2.89:11434/")
+    model_to_use = "gemma4:31b-cloud"
+    
+    print("🤖 OLLAMA TERMINAL CHATBOT\n[1] New Chat\n[2] Resume Chat")
+    choice = input("\nChoice: ").strip()
+    session_id = str(uuid.uuid4())[:8]
+
+    if choice == "2":
+        sessions = db_query("SELECT session_id, content FROM chat_messages WHERE role='user' GROUP BY session_id ORDER BY timestamp DESC LIMIT 5", fetchall=True)
+        if sessions:
+            for i, (s_id, text) in enumerate(sessions, 1):
+                print(f"  {i}. [{s_id}] {text[:30]}...")
+            try:
+                session_id = sessions[int(input("\nSelect number: ").strip()) - 1][0]
+                print(f"\n🔄 Resumed session: {session_id}")
+                for r, c in db_query("SELECT role, content FROM chat_messages WHERE session_id=? ORDER BY timestamp ASC", (session_id,), fetchall=True)[-4:]:
+                    print(f"{'You' if r=='user' else 'Bot'}: {c}")
+            except: print("\nInvalid choice. Starting new chat...")
+        else: print("\nNo past sessions found. Starting new chat...")
+
+    print(f"\n🤖 Active: {model_to_use} (Session: {session_id})")
+    print("💡 To read a file, type: read: <file_path> (e.g., read: data.txt)")
+    print("Type 'exit' to quit.\n" + "-"*40)
+
+    while True:
+        user_input = input("You: ")
+        if user_input.strip().lower() in ['quit', 'exit']: break
+        if not user_input.strip(): continue
+
+        # Save raw user command to history
+        db_query("INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'user', ?)", (session_id, user_input))
+        
+        # Check for profile name memory
+        saved_name = db_query("SELECT value FROM user_profile WHERE key='user_name'", fetch=True)
+        saved_name = saved_name[0] if saved_name else ai_detect_name(client, model_to_use, user_input)
+
+        # File-reading tool mechanism
+        processed_input = user_input
+        if user_input.lower().startswith("read:"):
+            file_path = user_input[5:]
+            print(f"📂 Reading file: {file_path.strip()}...")
+            file_content = read_file_tool(file_path)
+            # Combine the instruction with the actual file contents for the LLM
+            processed_input = f"[User uploaded file content from {file_path}]\n\n{file_content}\n\nPlease analyze or summarize the contents above."
+
+        messages = []
+        if saved_name:
+            messages.append({"role": "system", "content": f"The user's name is {saved_name}."})
+        
+        # Load past session logs, replacing the last raw command with the expanded file context if triggered
+        history = db_query("SELECT role, content FROM chat_messages WHERE session_id=? ORDER BY timestamp ASC", (session_id,), fetchall=True)
+        formatted_history = [{"role": r, "content": c} for r, c in history]
+        if user_input.lower().startswith("read:") and formatted_history:
+            formatted_history[-1]["content"] = processed_input
+
+        messages.extend(formatted_history)
+        
+        print("Thinking...")
+        try:
+            bot_res = client.chat(model=model_to_use, messages=messages).get('message', {}).get('content', '')
+            print(f"\nBot: {bot_res}\n" + "-"*40)
+            db_query("INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)", (session_id, bot_res))
+        except Exception as e:
+            print(f"\n❌ Error: {e}\n")
+
+if __name__ == "__main__":
+    main()
